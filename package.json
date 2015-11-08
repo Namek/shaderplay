@@ -1,0 +1,16 @@
+{
+  "name": "webgl_testing",
+  "version": "1.0.0",
+  "description": "",
+  "main": "webgl.htm",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "gulp": "^3.9.0",
+    "gulp-livereload": "^3.8.1",
+    "gulp-watch": "^4.3.5"
+  }
+}
