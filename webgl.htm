@@ -47,7 +47,7 @@
 		float NdotL = max(0.0, dot(normal, -lightDir));
 		vec3 tmp = vec3(0.0);
 
-		
+
 
 		gl_FragColor.a = 1.0;
 		gl_FragColor.rgb = color;
@@ -75,7 +75,7 @@
 
 		function createUniform(name, type) {
 			var uniform = gl.getUniformLocation(shaderProgram, name);
-			
+
 			if (type == '3f') {
 				return () => {
 					var vec = shaderValues[name];
@@ -290,10 +290,10 @@
 		squareVertexTextureCoordBuffer = gl.createBuffer();
 		gl.bindBuffer(gl.ARRAY_BUFFER, squareVertexTextureCoordBuffer);
 		var textureCoords = [
-			0.5, 0.5,
-			-0.5, 0.5,
-			0.5, -0.5,
-			-0.5, -0.5
+			1, 1,
+			0, 1,
+			1, 0,
+			0, 0
 		];
 		gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(textureCoords), gl.STATIC_DRAW);
 		squareVertexTextureCoordBuffer.itemSize = 2;
@@ -400,7 +400,7 @@
 		gl.clearColor(0, 0, 0, 1);
 		gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
-		mat4.perspective(pMatrix, 90, gl.viewportWidth / gl.viewportHeight, 0.1, 100.0);
+		mat4.perspective(pMatrix, Math.PI/2, gl.viewportWidth / gl.viewportHeight, 0.1, 100.0);
 
 		mat4.identity(mvMatrix);
 		mat4.translate(mvMatrix, mvMatrix, [0, 0.0, -1]);
