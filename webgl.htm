@@ -9,49 +9,84 @@
 
 <script id="shader-vs" type="x-shader/x-vertex">
 	attribute vec3 aVertexPosition;
+	attribute vec3 aVertexNormal;
 	attribute vec2 aTextureCoord;
+	attribute vec3 aVertexTangent;
+	attribute vec3 aVertexBitangent;
 
-	uniform mat4 uMVMatrix;
 	uniform mat4 uPMatrix;
+	uniform mat4 uMVMatrix;
+	uniform mat3 uMV3x3Matrix;
+
+	uniform vec3 uCamDirection;
+	uniform vec3 uLightDir;
 
 	varying vec2 vTextureCoord;
+	varying vec3 vertexNormal_cameraspace;
+	varying vec3 vertexTangent_cameraspace;
+	varying vec3 vertexBitangent_cameraspace;
+	varying vec3 LightDirection_tangentspace;
+	varying vec3 EyeDirection_tangentspace;
+
+	mat3 transpose(mat3 m) {
+		vec3 v0 = m[0];
+		vec3 v1 = m[1];
+		vec3 v2 = m[2];
+
+		return mat3(
+			vec3(v0.x, v1.x, v2.x),
+			vec3(v0.y, v1.y, v2.y),
+			vec3(v0.z, v1.z, v2.z)
+		);
+	}
 
 	void main(void) {
 		gl_Position = uPMatrix * uMVMatrix * vec4(aVertexPosition, 1.0);
 		vTextureCoord = aTextureCoord;
+		vertexNormal_cameraspace = uMV3x3Matrix * normalize(aVertexNormal);
+		vertexTangent_cameraspace = uMV3x3Matrix * normalize(aVertexTangent);
+		vertexBitangent_cameraspace = uMV3x3Matrix * normalize(aVertexBitangent);
+
+		// transpose is a more optimal `invert` in this case
+		mat3 TBN = transpose(mat3(
+			vertexTangent_cameraspace,
+			vertexBitangent_cameraspace,
+			vertexNormal_cameraspace
+		));
+
+		LightDirection_tangentspace = TBN * normalize(uLightDir);
+		EyeDirection_tangentspace = TBN * normalize(uCamDirection);
 	}
 </script>
 
 <script id="shader-fs" type="x-shader/x-fragment">
-	precision mediump float;
+	precision highp float;
 
 	varying vec2 vTextureCoord;
+	varying vec3 LightDirection_tangentspace;
+	varying vec3 EyeDirection_tangentspace;
+
 	uniform sampler2D uTexSampler;
 	uniform sampler2D uNMSampler;
-
-	uniform vec3 uLightDir;// = vec3(-0.1, -1, 0.2);
-
-	vec3 camPos = vec3(2.5, 1.5, -2.0);
-	vec3 camDir = vec3(-1.0, 0.0, 0.0);
-	vec3 normal = vec3(1.0, 0.0, 0.0);
+	uniform vec3 uLightDir;
+	uniform int enableNormalMapping;
 
 	void main(void) {
 		vec3 diffuse = texture2D(uTexSampler, vTextureCoord).rgb;
-		vec3 normalMap = texture2D(uNMSampler, vTextureCoord).rgb * 2.0 - 1.0;
-
-		camDir = normalize(camDir);
-		vec3 lightDir = normalize(uLightDir);
+		vec3 normalMap = normalize(texture2D(uNMSampler, vTextureCoord).rgb*2.0 - 1.0);
+		vec3 lightDir = normalize(LightDirection_tangentspace);
 
 		vec3 color = diffuse;
 
-		float NdotL = max(0.0, dot(normal, -lightDir));
-		vec3 tmp = vec3(0.0);
-
-
+		if (enableNormalMapping != 0) {
+			float cosTheta = dot(normalMap, -lightDir);
+			if (color.r + color.g + color.b > 0.3 && cosTheta < 0.0) {
+				color += vec3((cosTheta*0.5));
+			}
+		}
 
 		gl_FragColor.a = 1.0;
 		gl_FragColor.rgb = color;
-		// gl_FragColor = vec4(1.0, 0.0, 0.0, 1.0);
 	}
 </script>
 
@@ -60,7 +95,8 @@
 
 	var setupUniformValues = null;
 	var shaderValues = {
-		uLightDir: {x:-0.1, y:-1.0, z:0.2},
+		uLightDir: {x:10.0, y:0.0, z:-1.0},
+		enableNormalMapping: true
 	};
 
 	function initWebGL() {
@@ -88,6 +124,7 @@
 		}
 
 		var uniforms = [
+			createUniform('enableNormalMapping', '1i'),
 			createUniform('uLightDir', '3f'),
 		];
 
@@ -98,10 +135,16 @@
 		};
 
 		addValueController(
+			'b', 'enableNormalMapping',
+			(val) => { shaderValues.enableNormalMapping = val; },
+			() => shaderValues.enableNormalMapping
+		)
+
+		addValueController(
 			'v3', 'uLightDir',
 			(val, coord) => { shaderValues.uLightDir[coord] = val*1; },
 			(coord) => { return shaderValues.uLightDir[coord]; },
-			{min: -1.0, max: 1.0, step: 0.01}
+			{min: -10.0, max: 10.0, step: 0.01}
 		);
 
 		tick();
@@ -249,32 +292,49 @@
 		shaderProgram.vertexPositionAttribute = gl.getAttribLocation(shaderProgram, "aVertexPosition");
 		gl.enableVertexAttribArray(shaderProgram.vertexPositionAttribute);
 
+		shaderProgram.vertexNormalAttribute = gl.getAttribLocation(shaderProgram, "aVertexNormal");
+		gl.enableVertexAttribArray(shaderProgram.vertexNormalAttribute);
+
 		shaderProgram.textureCoordAttribute = gl.getAttribLocation(shaderProgram, "aTextureCoord");
 		gl.enableVertexAttribArray(shaderProgram.textureCoordAttribute);
 
+		shaderProgram.vertexTangentAttribute = gl.getAttribLocation(shaderProgram, "aVertexTangent");
+		gl.enableVertexAttribArray(shaderProgram.vertexTangentAttribute);
+
+		shaderProgram.vertexBitangentAttribute = gl.getAttribLocation(shaderProgram, "aVertexBitangent");
+		gl.enableVertexAttribArray(shaderProgram.vertexBitangentAttribute);
+
+
 		shaderProgram.pMatrixUniform = gl.getUniformLocation(shaderProgram, "uPMatrix");
 		shaderProgram.mvMatrixUniform = gl.getUniformLocation(shaderProgram, "uMVMatrix");
+		shaderProgram.mv3x3MatrixUniform = gl.getUniformLocation(shaderProgram, "uMV3x3Matrix");
         shaderProgram.textureSamplerUniform = gl.getUniformLocation(shaderProgram, "uTexSampler");
         shaderProgram.normalMapTextureSamplerUniform = gl.getUniformLocation(shaderProgram, "uNMSampler");
 	}
 
-	var mvMatrix = mat4.create();
 	var pMatrix = mat4.create();
+	var mvMatrix = mat4.create();
+	var mv3x3Matrix = mat3.create();
+	var cameraDir = vec3.create(0, 0, -1);
 
 	function setMatrixUniforms() {
 		gl.uniformMatrix4fv(shaderProgram.pMatrixUniform, false, pMatrix);
 		gl.uniformMatrix4fv(shaderProgram.mvMatrixUniform, false, mvMatrix);
+		gl.uniformMatrix3fv(shaderProgram.mv3x3MatrixUniform, false, mv3x3Matrix);
+		gl.uniform3f(shaderProgram.cameraDirUniform, cameraDir[0], cameraDir[1], cameraDir[2]);
 	}
 
 
 
 	var squareVertexPositionBuffer;
+	var squareVertexNormalBuffer;
 	var squareVertexTextureCoordBuffer;
 	var squareVertexIndexBuffer;
 	var squareTangentBuffer;
 	var squareBitangentBuffer;
 
 	function initBuffers() {
+		// vertices
 		squareVertexPositionBuffer = gl.createBuffer();
 		gl.bindBuffer(gl.ARRAY_BUFFER, squareVertexPositionBuffer);
 		var vertices = [
@@ -287,6 +347,7 @@
 		squareVertexPositionBuffer.itemSize = 3;
 		squareVertexPositionBuffer.numItems = 4;
 
+		// texture coords
 		squareVertexTextureCoordBuffer = gl.createBuffer();
 		gl.bindBuffer(gl.ARRAY_BUFFER, squareVertexTextureCoordBuffer);
 		var textureCoords = [
@@ -299,28 +360,43 @@
 		squareVertexTextureCoordBuffer.itemSize = 2;
 		squareVertexTextureCoordBuffer.numItems = 4;
 
+		// indices
 		squareVertexIndexBuffer = gl.createBuffer();
 		gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, squareVertexIndexBuffer);
-		var squareVertexIndices = [
+		var indices = [
 			0, 1, 2,
 			1, 2, 3
 		];
-		gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(squareVertexIndices), gl.STATIC_DRAW);
+		gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(indices), gl.STATIC_DRAW);
 		squareVertexIndexBuffer.itemSize = 1;
 		squareVertexIndexBuffer.numItems = 6;
 
+		// vertex normals
+		squareVertexNormalBuffer = gl.createBuffer();
+		gl.bindBuffer(gl.ARRAY_BUFFER, squareVertexNormalBuffer);
+		var vertexNormals = [
+			0, 0, 1,
+			0, 0, 1,
+			0, 0, 1,
+			0, 0, 1
+		];
+		gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertexNormals), gl.STATIC_DRAW);
+		squareVertexNormalBuffer.itemSize = 3;
+		squareVertexNormalBuffer.numItems = 4;
+
+
 		// foreach triangle compute the edge (deltaPos) and deltaUV to calculate then tangent and bitangent for normal mapping (TBN matrix)
 		var tangents = [], bitangents = [];
-		var svi = squareVertexIndices;
-		var svp = squareVertexPositionBuffer;
+		var svi = indices;
+		var svp = vertices;
 		var tcs = textureCoords;
-		for (var vi = 0; vi < squareVertexIndices.length; vi+=3) {
-			var v0 = vec3.fromValues(svp[svi[vi]], svp[svi[vi]+1], svp[svi[vi]+2]);
-			var v1 = vec3.fromValues(svp[svi[vi+1]], svp[svi[vi+1]+1], svp[svi[vi+1]+2]);
-			var v2 = vec3.fromValues(svp[svi[vi+2]], svp[svi[vi+2]+1], svp[svi[vi+2]+2]);
-			var uv0 = vec2.fromValues(tcs[svi[vi]], tcs[svi[vi]+1]);
-			var uv1 = vec2.fromValues(tcs[svi[vi+1]], tcs[svi[vi+1]+1]);
-			var uv2 = vec2.fromValues(tcs[svi[vi+2]], tcs[svi[vi+2]+1]);
+		for (var vi = 0; vi < indices.length; vi+=3) {
+			var v0 = vec3.fromValues(svp[svi[vi]*3], svp[svi[vi]*3+1], svp[svi[vi]*3+2]);
+			var v1 = vec3.fromValues(svp[svi[vi+1]*3], svp[svi[vi+1]*3+1], svp[svi[vi+1]*3+2]);
+			var v2 = vec3.fromValues(svp[svi[vi+2]*3], svp[svi[vi+2]*3+1], svp[svi[vi+2]*3+2]);
+			var uv0 = vec2.fromValues(tcs[svi[vi]*2], tcs[svi[vi]*2+1]);
+			var uv1 = vec2.fromValues(tcs[svi[vi+1]*2], tcs[svi[vi+1]*2+1]);
+			var uv2 = vec2.fromValues(tcs[svi[vi+2]*2], tcs[svi[vi+2]*2+1]);
 			var deltaPos1 = vec3.sub(vec3.create(),v1,v0);
 			var deltaPos2 = vec3.sub(vec3.create(),v2,v0);
 			var deltaUV1 = vec2.sub(vec3.create(), uv1, uv0);
@@ -332,17 +408,36 @@
 				vec3.scale(vec3.clone(deltaPos1), deltaPos1, deltaUV2[1]),
 				vec3.scale(vec3.clone(deltaPos2), deltaPos2, deltaUV1[1])
 			)
-			vec3.scale(tangent, r)
+			vec3.scale(tangent, tangent, r)
 
 			var bitangent = vec3.sub(
 				vec3.create(),
 				vec3.scale(vec3.clone(deltaPos2), deltaPos2, deltaUV1[0]),
 				vec3.scale(vec3.clone(deltaPos1), deltaPos1, deltaUV2[0])
 			)
-			vec3.scale(bitangent, r)
+			vec3.scale(bitangent, bitangent, r)
 
 			tangents.push(tangent[0], tangent[1], tangent[2]);
+			tangents.push(tangent[0], tangent[1], tangent[2]);
+			tangents.push(tangent[0], tangent[1], tangent[2]);
 			bitangents.push(bitangent[0], bitangent[1], bitangent[2]);
+			bitangents.push(bitangent[0], bitangent[1], bitangent[2]);
+			bitangents.push(bitangent[0], bitangent[1], bitangent[2]);
+		}
+
+		for (var vi = 0; vi < vertices.length; ++vi) {
+			var normal = vertexNormals[vi];
+			var t = tangents[vi];
+			var b = bitangents[vi];
+
+			// Gram-Schmidt orthogonalize
+			vec3.normalize(t, vec3.subtract(t, t, vec3.dot(normal, t)));
+
+			// Calculate handedness
+			var ntCross = vec3.cross(vec3.create(), normal, t);
+			if (vec3.dot(ntCross, b) < 0) {
+				t.scale(t, t, -1.0);
+			}
 		}
 
 		squareTangentBuffer = gl.createBuffer();
@@ -356,9 +451,6 @@
 		gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(bitangents), gl.STATIC_DRAW);
 		squareBitangentBuffer.itemSize = 3;
 		squareBitangentBuffer.numItems = squareVertexIndexBuffer.numItems;
-
-		// TODO tangents and bitangents could be and averaged for
-		// similiar vertices but it's not the case for our simple quad
 	}
 
 	function getShader(gl, id) {
@@ -404,12 +496,23 @@
 
 		mat4.identity(mvMatrix);
 		mat4.translate(mvMatrix, mvMatrix, [0, 0.0, -1]);
+		mat3.identity(mv3x3Matrix);
+		mat3.translate(mv3x3Matrix, mv3x3Matrix, [0, 0, -1]);
 
 		gl.bindBuffer(gl.ARRAY_BUFFER, squareVertexPositionBuffer);
 		gl.vertexAttribPointer(shaderProgram.vertexPositionAttribute, squareVertexPositionBuffer.itemSize, gl.FLOAT, false, 0, 0);
 
+		gl.bindBuffer(gl.ARRAY_BUFFER, squareVertexNormalBuffer);
+		gl.vertexAttribPointer(shaderProgram.vertexNormalAttribute, squareVertexNormalBuffer.itemSize, gl.FLOAT, false, 0, 0);
+
 		gl.bindBuffer(gl.ARRAY_BUFFER, squareVertexTextureCoordBuffer);
 		gl.vertexAttribPointer(shaderProgram.textureCoordAttribute, squareVertexTextureCoordBuffer.itemSize, gl.FLOAT, false, 0, 0);
+
+		gl.bindBuffer(gl.ARRAY_BUFFER, squareTangentBuffer);
+		gl.vertexAttribPointer(shaderProgram.vertexTangentAttribute, squareTangentBuffer.itemSize, gl.FLOAT, false, 0, 0);
+
+		gl.bindBuffer(gl.ARRAY_BUFFER, squareBitangentBuffer);
+		gl.vertexAttribPointer(shaderProgram.vertexBitangentAttribute, squareBitangentBuffer.itemSize, gl.FLOAT, false, 0, 0);
 
 		setupUniformValues();
 
